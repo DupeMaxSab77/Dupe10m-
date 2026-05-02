@@ -962,7 +962,7 @@ body.tv-mode::after{
 })();
 // ══════════════════════════════════════════════════════
 
-var BASE='__BASE_PATH__';
+var BASE='https://bautiai.up.railway.app';
 var LIVE_CH=[
   {n:'Canal 10',cat:'Uruguay',ic:'📺',url:'https://telelibree.com/en-vivo/canal-10-uruguay/embed.php'},
   {n:'Canal 4',cat:'Uruguay',ic:'📡',url:'https://telelibree.com/en-vivo/canal-4-uruguay/embed.php'},
@@ -1014,7 +1014,7 @@ var S={
   TMDB:'258519c3d82673fd9bd4186b2356ff27',
   TIMG:'https://image.tmdb.org/t/p'
 };
-var STANDALONE=(location.protocol==='file:' || location.protocol==='content:' || location.hostname==='localhost' || location.hostname==='127.0.0.1' || location.hostname==='bautiai.ccwu.cc' || location.hostname==='www.bautiai.ccwu.cc' || location.hostname.endsWith('.ccwu.cc'));
+var STANDALONE=true; // Always standalone — no backend required
 var _pendingLiveCh=null;
 var _lAct=null;
 
