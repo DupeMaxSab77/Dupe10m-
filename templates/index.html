@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
 <title>BautiAI NEXUS</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.4.12/hls.min.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 <style>
 :root{
@@ -961,12 +962,7 @@ body.tv-mode::after{
 })();
 // ══════════════════════════════════════════════════════
 
-var BASE=(function(){
-  var h=location.hostname;
-  if(h==='bautiai.up.railway.app') return 'https://bautiai.up.railway.app';
-  if(h==='bautiai.ccwu.cc'||h==='www.bautiai.ccwu.cc'||h.endsWith('.ccwu.cc')) return 'https://bautiai.ccwu.cc';
-  return location.origin;
-})();
+var BASE='__BASE_PATH__';
 var LIVE_CH=[
   {n:'Canal 10',cat:'Uruguay',ic:'📺',url:'https://telelibree.com/en-vivo/canal-10-uruguay/embed.php'},
   {n:'Canal 4',cat:'Uruguay',ic:'📡',url:'https://telelibree.com/en-vivo/canal-4-uruguay/embed.php'},
@@ -1018,7 +1014,7 @@ var S={
   TMDB:'258519c3d82673fd9bd4186b2356ff27',
   TIMG:'https://image.tmdb.org/t/p'
 };
-var STANDALONE=(location.protocol==='file:' || location.protocol==='content:' || location.hostname==='localhost' || location.hostname==='127.0.0.1' || location.hostname==='bautiai.up.railway.app' || location.hostname==='bautiai.ccwu.cc' || location.hostname==='www.bautiai.ccwu.cc' || location.hostname.endsWith('.ccwu.cc'));
+var STANDALONE=(location.protocol==='file:' || location.protocol==='content:' || location.hostname==='localhost' || location.hostname==='127.0.0.1' || location.hostname==='bautiai.ccwu.cc' || location.hostname==='www.bautiai.ccwu.cc' || location.hostname.endsWith('.ccwu.cc'));
 var _pendingLiveCh=null;
 var _lAct=null;
 
@@ -1082,7 +1078,7 @@ function dispType(t){ return (t==='tv'||t==='series') ? 'Serie' : 'Película'; }
       checkStream();
     } catch(e) {
       // If fetch fails and we're on a known standalone host, fall back to standalone mode
-      if(location.hostname==='bautiai.up.railway.app' || location.hostname==='bautiai.ccwu.cc' || location.hostname.endsWith('.ccwu.cc') || location.hostname==='localhost' || location.hostname==='127.0.0.1') {
+      if(location.hostname==='bautiai.ccwu.cc' || location.hostname.endsWith('.ccwu.cc') || location.hostname==='localhost' || location.hostname==='127.0.0.1') {
         var _saved2 = {};
         try { _saved2 = JSON.parse(localStorage.getItem('bautiai_profiles') || '{}'); } catch(e2){}
         S.user = _saved2.user || 'Usuario';
@@ -1220,7 +1216,8 @@ function loadHomeLive(){
   var row=document.getElementById('homeLiveRow'); row.innerHTML='';
   LIVE_CH.slice(0,14).forEach(function(ch){
     var c=document.createElement('div'); c.className='lcard-sm'; c.onclick=function(){homePlayLive(ch);};
-    c.innerHTML='<div class="lthumb"><span>'+ch.ic+'</span><div class="lbadge">EN VIVO</div></div><div class="linfo"><div class="lname">'+esc(ch.n)+'</div><div class="lcat">'+esc(ch.cat)+'</div></div>';
+    var tm=ch.logo?'<img src="'+esc(ch.logo)+'" onerror="this.style.display=\'none\'" style="width:100%;height:100%;object-fit:contain;background:#111;padding:6px" loading="lazy">':'<span>'+ch.ic+'</span>';
+    c.innerHTML='<div class="lthumb">'+tm+'<div class="lbadge">EN VIVO</div></div><div class="linfo"><div class="lname">'+esc(ch.n)+'</div><div class="lcat">'+esc(ch.cat)+'</div></div>';
     row.appendChild(c);
   });
 }
@@ -1948,51 +1945,144 @@ function buildPgn(cur, total){
 }
 
 // ===================== LIVE TV =====================
+// ── Live TV virtual-scroll state ──
+var _lvChs=[], _lvPage=0, _lvBatch=48, _lvLoading=false, _lvSearchQ='', _lvActiveCat='Todos';
+
 function buildLive(){
-  var cats=['Todos'];
-  LIVE_CH.forEach(function(c){ if(cats.indexOf(c.cat)<0) cats.push(c.cat); });
+  var seen={}, cats=['Todos'];
+  for(var i=0;i<LIVE_CH.length;i++){var ct=LIVE_CH[i].cat;if(!seen[ct]){seen[ct]=1;cats.push(ct);}}
   var fr=document.getElementById('lftrow'); fr.innerHTML='';
+  // Search box
+  var srchWrap=document.createElement('div');
+  srchWrap.style.cssText='width:100%;margin-bottom:.6rem;';
+  srchWrap.innerHTML='<input id="liveSearch" type="text" placeholder="🔍 Buscar canal..." value="'+esc(_lvSearchQ)+'" oninput="_lvOnSearch(this.value)" style="width:100%;background:#1a1a1a;border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#fff;font-size:.85rem;padding:.5rem .9rem;outline:none;font-family:inherit;box-sizing:border-box">';
+  fr.appendChild(srchWrap);
+  // Category pills
+  var catRow=document.createElement('div');
+  catRow.style.cssText='display:flex;gap:5px;flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;-ms-overflow-style:none';
   cats.forEach(function(cat){
-    var b=document.createElement('button'); b.className='lfbtn'+(cat==='Todos'?' on':''); b.textContent=cat;
-    b.onclick=function(){ filterLive(cat, b); }; fr.appendChild(b);
+    var b=document.createElement('button');
+    b.className='ic-cat'+(cat===_lvActiveCat?' on':'');
+    b.textContent=cat;
+    b.onclick=function(){_lvFilterCat(cat,catRow);}; 
+    catRow.appendChild(b);
   });
-  renderLive(LIVE_CH);
+  fr.appendChild(catRow);
+  _lvApply(_lvGetPool());
   if(_pendingLiveCh){
     var ch=_pendingLiveCh; _pendingLiveCh=null;
-    setTimeout(function(){
-      var cards=document.querySelectorAll('#lgrid .lcard');
-      for(var i=0;i<cards.length;i++){
-        var nm=cards[i].querySelector('.lname');
-        if(nm&&nm.textContent.trim()===ch.n.trim()){ playLive(cards[i], ch); return; }
-      }
-    }, 80);
+    _lvPlayDirect(ch);
   }
 }
-function filterLive(cat, btn){
-  document.querySelectorAll('.lfbtn').forEach(function(b){ b.classList.remove('on'); });
-  btn.classList.add('on');
-  renderLive(cat==='Todos' ? LIVE_CH : LIVE_CH.filter(function(c){return c.cat===cat;}));
+function _lvGetPool(){
+  var pool=(_lvActiveCat==='Todos')?LIVE_CH:LIVE_CH.filter(function(c){return c.cat===_lvActiveCat;});
+  return _lvSearchQ?pool.filter(function(c){return c.n.toLowerCase().indexOf(_lvSearchQ)>-1;}):pool;
 }
-function renderLive(chs){
+function _lvOnSearch(q){
+  _lvSearchQ=q.toLowerCase().trim();
+  _lvApply(_lvGetPool());
+}
+function filterLive(cat,btn){ _lvActiveCat=cat; _lvSearchQ=''; var si=document.getElementById('liveSearch');if(si)si.value=''; _lvApply(_lvGetPool()); }
+function _lvFilterCat(cat,catRow){
+  _lvActiveCat=cat; _lvSearchQ=''; var si=document.getElementById('liveSearch');if(si)si.value='';
+  catRow.querySelectorAll('.ic-cat').forEach(function(b){b.classList.remove('on');});
+  catRow.querySelectorAll('.ic-cat').forEach(function(b){if(b.textContent===cat)b.classList.add('on');});
+  _lvApply(_lvGetPool());
+}
+function _lvApply(list){
+  _lvChs=list; _lvPage=0; _lvLoading=false;
   var g=document.getElementById('lgrid'); g.innerHTML='';
-  chs.forEach(function(ch){
-    var c=document.createElement('div'); c.className='lcard'; c.onclick=function(){ playLive(c, ch); };
-    c.innerHTML='<div class="lthumb"><span>'+ch.ic+'</span><div class="lbadge">EN VIVO</div></div><div class="linfo"><div class="lname">'+esc(ch.n)+'</div><div class="lcat">'+esc(ch.cat)+'</div></div>';
-    g.appendChild(c);
-  });
+  if(window._lvObs){window._lvObs.disconnect();window._lvObs=null;}
+  if(!list.length){g.innerHTML='<div style="grid-column:1/-1;padding:30px;text-align:center;color:#555;font-size:.9rem">Sin canales</div>';return;}
+  _lvRenderBatch();
+}
+function _lvMakeCard(ch){
+  var c=document.createElement('div'); c.className='lcard'; c.onclick=function(){playLive(c,ch);};
+  var tImg=ch.logo?'<img src="'+esc(ch.logo)+'" onerror="this.style.display=\'none\'" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#111;padding:8px" loading="lazy">':'';
+  c.innerHTML='<div class="lthumb" style="position:relative">'+tImg+(ch.logo?'':'<span>'+ch.ic+'</span>')+'<div class="lbadge">EN VIVO</div></div><div class="linfo"><div class="lname">'+esc(ch.n)+'</div><div class="lcat">'+esc(ch.cat)+'</div></div>';
+  return c;
+}
+function _lvRenderBatch(){
+  if(_lvLoading) return;
+  var start=_lvPage*_lvBatch, slice=_lvChs.slice(start,start+_lvBatch);
+  if(!slice.length) return;
+  _lvLoading=true;
+  var g=document.getElementById('lgrid');
+  var old=document.getElementById('lvSentinel'); if(old) old.remove();
+  var frag=document.createDocumentFragment();
+  for(var i=0;i<slice.length;i++) frag.appendChild(_lvMakeCard(slice[i]));
+  g.appendChild(frag);
+  _lvPage++;
+  _lvLoading=false;
+  // Sentinel for infinite scroll
+  if(_lvPage*_lvBatch<_lvChs.length){
+    var sentinel=document.createElement('div'); sentinel.id='lvSentinel';
+    sentinel.style.cssText='grid-column:1/-1;height:4px';
+    g.appendChild(sentinel);
+    window._lvObs=new IntersectionObserver(function(entries){
+      if(entries[0].isIntersecting) _lvRenderBatch();
+    },{rootMargin:'400px'});
+    window._lvObs.observe(sentinel);
+  }
+}
+function renderLive(chs){_lvApply(chs);}
+function _lvPlayDirect(ch){
+  var cards=document.querySelectorAll('#lgrid .lcard');
+  for(var i=0;i<cards.length;i++){
+    var nm=cards[i].querySelector('.lname');
+    if(nm&&nm.textContent===ch.n){playLive(cards[i],ch);return;}
+  }
+  playLive(document.createElement('div'),ch);
 }
 function playLive(card, ch){
   if(_lAct) _lAct.classList.remove('pl');
   _lAct=card; card.classList.add('pl');
   document.getElementById('lnow').textContent=ch.n;
-  document.getElementById('liframe').src=ch.url;
-  document.getElementById('lpwrap').classList.add('vis');
-  document.getElementById('lpwrap').scrollIntoView({behavior:'smooth', block:'start'});
+  var isM3u=ch.isM3u||/\.m3u8?(\?|$)/i.test(ch.url);
+  var lw=document.getElementById('lpwrap');
+  if(isM3u){
+    // Replace iframe with HLS video player for M3U channels
+    var vbox=lw.querySelector('.vbox');
+    var oldEl=document.getElementById('liframe')||document.getElementById('liveM3uVid');
+    if(oldEl) oldEl.remove();
+    if(window._liveHls){window._liveHls.destroy();window._liveHls=null;}
+    var vid=document.createElement('video');
+    vid.id='liveM3uVid'; vid.controls=true; vid.autoplay=true; vid.playsInline=true;
+    vid.style.cssText='width:100%;height:100%;background:#000;border-radius:0;display:block';
+    vbox.appendChild(vid);
+    if(typeof Hls!=='undefined'&&Hls.isSupported()){
+      var h=new Hls({maxBufferLength:20});
+      h.loadSource(ch.url); h.attachMedia(vid);
+      h.on(Hls.Events.MANIFEST_PARSED,function(){vid.play().catch(function(){});});
+      window._liveHls=h;
+    } else if(vid.canPlayType('application/vnd.apple.mpegurl')){
+      vid.src=ch.url; vid.play().catch(function(){});
+    } else {
+      // fallback: try iframe
+      vid.remove();
+      var ifr=document.createElement('iframe'); ifr.id='liframe';
+      ifr.allow='autoplay;encrypted-media;fullscreen;picture-in-picture'; ifr.allowFullscreen=true;
+      ifr.style.cssText='width:100%;height:100%;border:none;display:block';
+      ifr.src=ch.url; vbox.appendChild(ifr);
+    }
+  } else {
+    // Restore iframe if needed
+    var vbox=lw.querySelector('.vbox');
+    var vid=document.getElementById('liveM3uVid');
+    if(vid){vid.remove();if(window._liveHls){window._liveHls.destroy();window._liveHls=null;}}
+    var ifr=document.getElementById('liframe');
+    if(!ifr){ifr=document.createElement('iframe');ifr.id='liframe';ifr.allow='autoplay;encrypted-media;fullscreen;picture-in-picture';ifr.allowFullscreen=true;ifr.style.cssText='width:100%;height:100%;border:none';vbox.appendChild(ifr);}
+    ifr.src=ch.url;
+  }
+  lw.classList.add('vis');
+  lw.scrollIntoView({behavior:'smooth', block:'start'});
 }
 function closeLive(){
   if(_lAct) _lAct.classList.remove('pl');
   _lAct=null;
-  document.getElementById('liframe').src='';
+  var vid=document.getElementById('liveM3uVid');
+  if(vid){vid.pause();vid.remove();if(window._liveHls){window._liveHls.destroy();window._liveHls=null;}}
+  var ifr=document.getElementById('liframe'); if(ifr) ifr.src='';
   document.getElementById('lpwrap').classList.remove('vis');
 }
 
@@ -3052,6 +3142,7 @@ function icPlay(ch){
 
 
 </script>
+<script src="channels.js"></script>
 
 
 </body>
